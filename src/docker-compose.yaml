@@ -1,0 +1,55 @@
+version: '3.5'
+
+
+services:
+  my-elast:
+    image: docker.elastic.co/elasticsearch/elasticsearch:7.16.3
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elast_data:/usr/share/elasticsearch/data
+    environment:
+      - "discovery.type=single-node"
+    networks:
+      - mynetwork
+      
+  postgres:
+    container_name: postgres_container
+    image: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: /data/postgres
+    volumes:
+      - ./database/postgres:/data/postgres
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - mynetwork
+      
+  python:
+    container_name: python
+    # image: python:3.10
+    image: kapedalex/my_python
+    working_dir: /usr/src/app/
+    ports:
+      - "3000:3000"
+    env_file: .env
+    volumes:
+      - ./utils:/usr/src/app/utils
+      - ./server:/usr/src/app/server
+#    command: sh -c "while true; do sleep 1000; done"
+    command: sh -c "sh ./utils/wait-for-ports.sh && python utils/converter.py && python server/main.py"
+    networks:
+      - mynetwork
+
+
+volumes:
+  elast_data:
+  
+  
+networks:
+  mynetwork:
+    driver: bridge
