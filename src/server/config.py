@@ -1,12 +1,10 @@
 """
 Config for DRY
 """
-import contextlib
 import elasticsearch
-import psycopg2
 from elasticsearch import Elasticsearch
-from typing import Any
 import os
+import psycopg2
 
 ES_URL = os.environ.get('ELASTIC_URL')
 PG_DB_NAME = os.environ.get('POSTGRES_DB')
@@ -37,24 +35,15 @@ def create_elasticsearch_connection():
         raise elasticsearch.exceptions.NotFoundError(f"Error connecting to Elasticsearch: {e}")
 
 
-@contextlib.contextmanager
-def execute_pg_query(query: str, fetch: str = "all", params=None) -> Any:
-    """Simple postgres queries use. I wonder if I did it wrong?"""
+class ExecutePGquery:
+    def __init__(self):
+        self.conn = create_postgres_connection()
+        self.cur = self.conn.cursor()
 
-    conn = create_postgres_connection()
-    cur = conn.cursor()
+    def __enter__(self):
+        return self.cur
 
-    try:
-        cur.execute(query, params)
-        conn.commit()
-        result = None
-
-        if fetch == "all":
-            result = cur.fetchall()
-        elif fetch == "one":
-            result = cur.fetchone()
-
-        yield result
-    finally:
-        cur.close()
-        conn.close()
+    def __exit__(self, type, value, traceback):
+        self.conn.commit()
+        self.cur.close()
+        self.conn.close()

@@ -1,7 +1,6 @@
 """
 Search and delete docs
 """
-
 from aiohttp import web
 import psycopg2
 import elasticsearch
@@ -33,14 +32,12 @@ async def search_documents(request: web.Request) -> web.Response:
         hits = response["hits"]["hits"]
         doc_ids = [hit["_id"] for hit in hits]
 
-        with config.execute_pg_query(
-                "SELECT p.text, p.created_date, r.rubric FROM posts p "
+        with config.ExecutePGquery() as cur:
+            cur.execute("SELECT p.text, p.created_date, r.rubric FROM posts p "
                 "JOIN post_rubrics pr ON p.id = pr.post_id "
                 "JOIN rubrics r ON pr.rubric_id = r.id "
-                "WHERE p.id::text = ANY(%s) ORDER BY p.created_date ASC;",
-                params=(doc_ids,),
-        ) as documents:
-            return web.Response(text=str(documents))
+                "WHERE p.id::text = ANY(%s) ORDER BY p.created_date ASC;", [doc_ids])
+            return web.Response(text=str(cur.fetchall()))
 
     else:
         return web.Response(text='Nothing found in Elasticsearch.', status=404)
@@ -55,13 +52,9 @@ async def delete_documents(request: web.Request) -> web.Response:
 
     # There is strange CASCADE in postgres, so let it be simple
     try:
-        conn = config.create_postgres_connection()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM post_rubrics WHERE post_id = %s;", [query])
-        cur.execute("DELETE FROM posts WHERE id = %s;", [query])
-        conn.commit()
-        cur.close()
-        conn.close()
+        with config.ExecutePGquery() as cur:
+            cur.execute("DELETE FROM post_rubrics WHERE post_id = %s;", [query])
+            cur.execute("DELETE FROM posts WHERE id = %s;", [query])
 
         try:
             e = config.create_elasticsearch_connection()
