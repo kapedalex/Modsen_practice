@@ -1,10 +1,14 @@
 """
 Search and delete docs
 """
-from aiohttp import web
 import psycopg2
 import elasticsearch
-import config
+from cryptography import fernet
+from aiohttp import web
+from aiohttp_session import setup, get_session
+from aiohttp_session.cookie_storage import EncryptedCookieStorage
+from src.server import config
+
 
 
 async def search_documents(request: web.Request) -> web.Response:
@@ -32,12 +36,12 @@ async def search_documents(request: web.Request) -> web.Response:
         hits = response["hits"]["hits"]
         doc_ids = [hit["_id"] for hit in hits]
 
-        with config.ExecutePGquery() as cur:
-            cur.execute("SELECT p.text, p.created_date, r.rubric FROM posts p "
+        with config.PGQueryExecutor() as executor:
+            executor.execute("SELECT p.text, p.created_date, r.rubric FROM posts p "
                 "JOIN post_rubrics pr ON p.id = pr.post_id "
                 "JOIN rubrics r ON pr.rubric_id = r.id "
                 "WHERE p.id::text = ANY(%s) ORDER BY p.created_date ASC;", [doc_ids])
-            return web.Response(text=str(cur.fetchall()))
+            return web.Response(text=str(executor.fetchall()))
 
     else:
         return web.Response(text='Nothing found in Elasticsearch.', status=404)
@@ -52,9 +56,9 @@ async def delete_documents(request: web.Request) -> web.Response:
 
     # There is strange CASCADE in postgres, so let it be simple
     try:
-        with config.ExecutePGquery() as cur:
-            cur.execute("DELETE FROM post_rubrics WHERE post_id = %s;", [query])
-            cur.execute("DELETE FROM posts WHERE id = %s;", [query])
+        with config.PGQueryExecutor() as executor:
+            executor.execute("DELETE FROM post_rubrics WHERE post_id = %s;", [query])
+            executor.execute("DELETE FROM posts WHERE id = %s;", [query])
 
         try:
             e = config.create_elasticsearch_connection()
@@ -69,6 +73,9 @@ async def delete_documents(request: web.Request) -> web.Response:
 
 def main():
     app = web.Application()
+    fernet_key = fernet.Fernet.generate_key()
+    f = fernet.Fernet(fernet_key)
+    setup(app, EncryptedCookieStorage(f))
     app.router.add_get('/search', search_documents)
     app.router.add_get('/delete', delete_documents)
     web.run_app(app, host=config.PY_HOST, port=config.PY_PORT)
