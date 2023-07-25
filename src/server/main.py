@@ -1,14 +1,11 @@
-"""
-Search and delete docs
-"""
-import psycopg2
 import elasticsearch
-from cryptography import fernet
 from aiohttp import web
-from aiohttp_session import setup, get_session
+from aiohttp_session import setup
 from aiohttp_session.cookie_storage import EncryptedCookieStorage
-from src.server import config
+from cryptography import fernet
 
+from config import Session, create_elasticsearch_connection, INDEX, PY_HOST, PY_PORT
+from models import Post, Rubric, PostRubric
 
 
 async def search_documents(request: web.Request) -> web.Response:
@@ -17,7 +14,7 @@ async def search_documents(request: web.Request) -> web.Response:
     if not query:
         return web.Response(text='Query parameter is missing.', status=400)
 
-    e = config.create_elasticsearch_connection()
+    e = create_elasticsearch_connection()
     payload = {
         "query": {
             "match": {
@@ -28,7 +25,7 @@ async def search_documents(request: web.Request) -> web.Response:
     }
 
     try:
-        response = e.search(index=config.INDEX, body=payload)
+        response = e.search(index=INDEX, body=payload)
     except elasticsearch.exceptions.NotFoundError as e:
         return web.Response(text=f"Error connecting to Elasticsearch: {e}")
 
@@ -36,13 +33,23 @@ async def search_documents(request: web.Request) -> web.Response:
         hits = response["hits"]["hits"]
         doc_ids = [hit["_id"] for hit in hits]
 
-        with config.PGQueryExecutor() as executor:
-            executor.execute("SELECT p.text, p.created_date, r.rubric FROM posts p "
-                "JOIN post_rubrics pr ON p.id = pr.post_id "
-                "JOIN rubrics r ON pr.rubric_id = r.id "
-                "WHERE p.id::text = ANY(%s) ORDER BY p.created_date ASC;", [doc_ids])
-            return web.Response(text=str(executor.fetchall()))
+        session = Session()
+        try:
+            subquery = session.query(Post.id).\
+                join(PostRubric).join(Rubric).\
+                filter(Post.id.in_(doc_ids)).\
+                subquery()
 
+            query_result = session.query(Post.text, Post.created_date, Rubric.rubric).\
+                select_from(Post).\
+                join(PostRubric, Post.id == PostRubric.post_id).\
+                join(Rubric, Rubric.id == PostRubric.rubric_id).\
+                filter(Post.id.in_(subquery)).\
+                order_by(Post.created_date.asc()).all()
+
+            return web.Response(text=str(query_result))
+        finally:
+            session.close()
     else:
         return web.Response(text='Nothing found in Elasticsearch.', status=404)
 
@@ -54,21 +61,26 @@ async def delete_documents(request: web.Request) -> web.Response:
     if not query:
         return web.Response(text='Query parameter is missing.', status=400)
 
-    # There is strange CASCADE in postgres, so let it be simple
     try:
-        with config.PGQueryExecutor() as executor:
-            executor.execute("DELETE FROM post_rubrics WHERE post_id = %s;", [query])
-            executor.execute("DELETE FROM posts WHERE id = %s;", [query])
-
+        session = Session()
         try:
-            e = config.create_elasticsearch_connection()
-            text = str(e.delete(index=config.INDEX, id=query))
-            return web.Response(text=text)
-        except elasticsearch.exceptions.NotFoundError as e:
-            return web.Response(text=f"Error connecting to Elasticsearch: {e}")
+            post = session.query(Post).get(query)
+            if post:
+                session.delete(post)
+                session.commit()
 
-    except psycopg2.Error as e:
-        return web.Response(text=f"Error connecting to Postgres: {e}")
+                e = create_elasticsearch_connection()
+                e.delete(index=INDEX, id=query)
+
+                return web.Response(text='Document deleted successfully.')
+            else:
+                return web.Response(text='Document not found.', status=404)
+
+        finally:
+            session.close()
+
+    except Exception as e:
+        return web.Response(text=f"Error: {e}")
 
 
 def main():
@@ -78,7 +90,7 @@ def main():
     setup(app, EncryptedCookieStorage(f))
     app.router.add_get('/search', search_documents)
     app.router.add_get('/delete', delete_documents)
-    web.run_app(app, host=config.PY_HOST, port=config.PY_PORT)
+    web.run_app(app, host=PY_HOST, port=PY_PORT)
 
 
 if __name__ == "__main__":
