@@ -45,4 +45,5 @@ class RubricBase(BaseModel):
 
 
 class RubricCreate(RubricBase):
-    pass
+    rubric: str
+
