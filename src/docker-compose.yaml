@@ -31,17 +31,18 @@ services:
       
   python:
     container_name: python
-    # image: python:3.10
+#    image: python:3.10
     image: kapedalex/my_python
     working_dir: /usr/src/app/
     ports:
       - "3000:3000"
     env_file: .env
     volumes:
+      - .:/usr/src/app/
       - ./utils:/usr/src/app/utils
       - ./server:/usr/src/app/server
 #    command: sh -c "while true; do sleep 1000; done"
-    command: sh -c "sh ./utils/wait-for-ports.sh && python utils/converter.py && python server/main.py"
+    command: sh -c "sh ./utils/wait-for-ports.sh && alembic upgrade head && python utils/converter.py && python server/main.py"
     networks:
       - mynetwork
 

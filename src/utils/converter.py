@@ -1,16 +1,17 @@
-"""
-Скрипт для ввода данных в postgres и elasticsearch с исходного csv
-"""
-
 import csv
 import os
 import sys
+
 import pandas as pd
-import psycopg2
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, relationship
 
 # TODO: fix sys.path problem
 sys.path.append('.')
+from server.models import Post, Rubric, PostRubric, PostCreate
 from server import config
+
+Base = declarative_base()
 
 
 def elastic_insert_logic(file_name: str):
@@ -33,57 +34,36 @@ def elastic_insert_logic(file_name: str):
 
 def postgres_insert_logic(file_name: str):
     """Postgres data add"""
+    Session = sessionmaker(bind=config.engine)
+    session = Session()
+
     try:
-        conn = config.create_postgres_connection()
-        cur = conn.cursor()
-
-        cur.execute("DROP TABLE IF EXISTS posts;")
-        cur.execute("""CREATE TABLE posts(
-            id SERIAL PRIMARY KEY,
-            text text NOT NULL,
-            created_date date NOT NULL
-        )
-        """)
-
-        cur.execute("DROP TABLE IF EXISTS rubrics;")
-        cur.execute("""CREATE TABLE rubrics(
-            id SERIAL PRIMARY KEY,
-            rubric text NOT NULL
-        )
-        """)
-
-        cur.execute("DROP TABLE IF EXISTS post_rubrics;")
-        cur.execute("""CREATE TABLE post_rubrics(
-            post_id INT REFERENCES posts(id),
-            rubric_id INT REFERENCES rubrics(id),
-            PRIMARY KEY (post_id, rubric_id)
-        )
-        """)
-
-        # TODO: bulk. I know it is worse than was.
         with open(file_name, 'r') as f:
             reader = csv.reader(f)
             next(reader)
             for row in reader:
-                sql = "INSERT INTO posts (text, created_date) VALUES (%s, %s) RETURNING id;"
-                cur.execute(sql, (row[0], row[1]))
-                post_id = cur.fetchone()[0]
+                text, created_date, rubrics = row
 
-                rubrics = eval(row[2])
-                for rubric in rubrics:
-                    sql = "INSERT INTO rubrics (rubric) VALUES (%s) RETURNING id;"
-                    cur.execute(sql, (rubric,))
-                    rubric_id = cur.fetchone()[0]
+                post_data = PostCreate(text=text, created_date=created_date, rubrics=eval(rubrics))
 
-                    sql = "INSERT INTO post_rubrics (post_id, rubric_id) VALUES (%s, %s);"
-                    cur.execute(sql, (post_id, rubric_id))
+                post = Post(**post_data.dict(exclude={'rubrics'}))
+                session.add(post)
+                session.flush()
 
-        conn.commit()
-        cur.close()
-        conn.close()
+                for rubric_name in post_data.rubrics:
+                    rubric = Rubric(rubric=rubric_name)
+                    session.add(rubric)
+                    session.flush()
 
-    except psycopg2.Error as e:
-        print(f"Error connecting to Postgres converter: {e}")
+                    post_rubric = PostRubric(post_id=post.id, rubric_id=rubric.id)
+                    session.add(post_rubric)
+
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        print(f"Error inserting data into PostgreSQL: {e}")
+    finally:
+        session.close()
 
 
 def main():
