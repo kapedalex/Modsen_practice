@@ -51,12 +51,15 @@ def postgres_insert_logic(file_name: str):
                 session.flush()
 
                 for rubric_name in post_data.rubrics:
-                    rubric = Rubric(rubric=rubric_name)
-                    session.add(rubric)
-                    session.flush()
+                    existing_rubric = session.query(Rubric).filter_by(rubric=rubric_name).first()
 
-                    post_rubric = PostRubric(post_id=post.id, rubric_id=rubric.id)
-                    session.add(post_rubric)
+                    if not existing_rubric:
+                        rubric = Rubric(rubric=rubric_name)
+                        session.add(rubric)
+                        session.flush()
+
+                        post_rubric = PostRubric(post_id=post.id, rubric_id=rubric.id)
+                        session.add(post_rubric)
 
         session.commit()
     except Exception as e:

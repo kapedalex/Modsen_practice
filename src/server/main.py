@@ -32,21 +32,16 @@ async def search_documents(request: web.Request) -> web.Response:
     if response["hits"]["total"]["value"] > 0:
         hits = response["hits"]["hits"]
         doc_ids = [hit["_id"] for hit in hits]
-
+        print(doc_ids)
         session = Session()
         try:
-            subquery = session.query(Post.id).\
-                join(PostRubric).join(Rubric).\
-                filter(Post.id.in_(doc_ids)).\
-                subquery()
-
-            query_result = session.query(Post.text, Post.created_date, Rubric.rubric).\
-                select_from(Post).\
-                join(PostRubric, Post.id == PostRubric.post_id).\
-                join(Rubric, Rubric.id == PostRubric.rubric_id).\
-                filter(Post.id.in_(subquery)).\
+            query_result = session.query(Post.id, Post.text, Post.created_date). \
+                select_from(Post). \
+                where(Post.id.in_(doc_ids)). \
+                distinct(). \
                 order_by(Post.created_date.asc()).all()
 
+            print(query_result)
             return web.Response(text=str(query_result))
         finally:
             session.close()

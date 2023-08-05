@@ -8,7 +8,6 @@ wait_for_port() {
   local timeout=60
 
   echo "Проверка доступности порта $port..."
-
   # Цикл ожидания доступности порта
   while ! nc -z "$host" "$port" >/dev/null 2>&1; do
     timeout=$((timeout - 1))
