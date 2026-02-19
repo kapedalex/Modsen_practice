@@ -1,4 +1,4 @@
-# Modsen_practice
+# docker-practice
 
 This project is a web application that allows users to search for and manage documents using Elasticsearch and a PostgreSQL. It is designed for scenarios where efficient retrieval and management of large volumes of text data are required, such as in content management systems, blogs, or knowledge bases. The application utilizes the asynchronous framework aiohttp and provides a RESTful API for interacting with the data.
 
